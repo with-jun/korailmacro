@@ -6,6 +6,12 @@ function injectJs(srcFile) {
     document.getElementsByTagName('head')[0].appendChild(scr);
 }
 
+function injectCode(fnc) {
+	var scr = document.createElement('script');
+	scr.textContent = '(' + fnc.toString() + ')();';
+	document.getElementsByTagName('head')[0].appendChild(scr);
+}
+
 function redirectPage(href) {
 	if (href.indexOf("javascript:") == 0) {
 		href = "window.showModalDialog=window.showModalDialog || function(url, arg, opt) {window.open(url, arg, opt);};window.confirm=function (str) {return true;};infochk=function(a,b){infochk2(a,b);};" + href.substring(11, href.length);
@@ -15,12 +21,49 @@ function redirectPage(href) {
 	}
 }
 
+function bypassCapcha() {
+	const targetElement = document.getElementById("captImg");
+	if (!targetElement) {
+		setTimeout(bypassCapcha, 500);
+		return;
+	}
+
+	function toDataURL(imgElement) {
+		var canvas = document.createElement("canvas");
+		var ctx = canvas.getContext("2d");
+
+		canvas.width = imgElement.width;
+		canvas.height = imgElement.height;
+		ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height);
+
+		return canvas.toDataURL();
+	}
+	const dataURL = toDataURL(targetElement);
+	chrome.extension.sendMessage({ type: 'detectText', dataURL: dataURL }, function(data) {
+		injectCode(() => {
+			const originalAlert = window.alert;
+			window.alert = (message) => {
+				if (message === '입력값이 일치하지 않습니다.') {
+					window.location.reload();
+					return;
+				}
+
+				return originalAlert(message);
+			};
+		});
+
+		document.querySelector("#chkCapAnswer").value = data;
+		document.querySelector('.ui-dialog button').click();
+	});
+}
+
 var dsturl1 = "https://www.letskorail.com/ebizprd/EbizPrdTicketPr21111_i1.do";
 var dsturl2 = "https://www.letskorail.com/ebizprd/EbizPrdTicketpr21100W_pr21110.do";
 if (document.URL.substring(0, dsturl1.length) == dsturl1 ||
 	document.URL.substring(0, dsturl2.length) == dsturl2) {
 
 	$(document).ready(function() {
+		bypassCapcha();
 		injectJs(chrome.extension.getURL('inject.js'));
 
 		var coachSelected = JSON.parse(localStorage.getItem('coachSelected'));
