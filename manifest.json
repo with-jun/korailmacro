@@ -4,12 +4,12 @@
   "description": "KORAIL 자동 예약 매크로",
   "version": "1.2.2",
   "permissions": [
-    "https://www.letskorail.com/"
+    "https://www.korail.com/"
   ],
   "content_scripts": [ {
     "all_frames": true,
     "js": ["jquery-1.11.0.min.js", "content.js"],
-    "matches": ["https://www.letskorail.com/*"],
+    "matches": ["https://www.korail.com/*"],
     "run_at": "document_end"
   }],
   "background": {
