@@ -61,6 +61,15 @@ var dsturl1 = "https://www.korail.com/ticket/search/list";
 if (document.URL.substring(0, dsturl1.length) == dsturl1) {
 
 	var bootstrap = function() {
+		var hasModal = $('.ReactModal__Content').length > 0;
+		if (hasModal) {
+			var message = document.querySelector('.ReactModal__Content').textContent;
+			if (message.includes('매크로 등 이상접속 감지')) {
+				window.location.reload();
+				return;
+			}
+		}
+
 		var hasLoaded = $('.tckWrap .tckList .tck_inner').length > 0;
 		if (!hasLoaded) {
 			setTimeout(bootstrap, 100);
