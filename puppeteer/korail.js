@@ -2,6 +2,7 @@ const { detectCaptcha } = require('./captcha');
 
 const URL_MAIN = 'https://www.korail.com/ticket/main';
 const URL_LOGIN = 'https://www.korail.com/ticket/login';
+const URL_SEARCH_FORM = 'https://www.korail.com/ticket/search/general';
 const URL_SEARCH = 'https://www.korail.com/ticket/search/list';
 
 const SEL = {
@@ -67,6 +68,9 @@ class Korail {
     } catch (err) {
       throw new Error(`자동 로그인 실패: ${err.message}. 수동 로그인 모드로 전환을 권장합니다.`);
     }
+
+    this.log(`로그인 완료 — ${URL_SEARCH_FORM} 으로 이동`);
+    await this.page.goto(URL_SEARCH_FORM, { waitUntil: 'networkidle2' });
   }
 
   async waitForUserToReachSearchList() {
