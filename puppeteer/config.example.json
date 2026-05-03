@@ -8,14 +8,6 @@
     "password": "",
     "autoLogin": false
   },
-  "search": {
-    "departure": "영등포",
-    "arrival": "대전",
-    "date": "2026-05-04",
-    "time": "13:00",
-    "passengers": 1,
-    "auto": false
-  },
   "polling": {
     "minDelayMs": 3000,
     "maxDelayMs": 6000,
