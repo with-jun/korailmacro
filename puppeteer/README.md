@@ -59,7 +59,43 @@ NetFunnel 같은 한국 안티봇은 stealth 플러그인만으로 부족함. CD
 | `polling.maxIterations` | 최대 재시도 횟수. `0` 이면 무한 |
 | `ocr.endpoint` | CAPTCHA OCR 서버 주소 (기존 background.js 와 동일) |
 | `ocr.enabled` | OCR 사용 여부 |
-| `telegram.botToken` / `chatId` | 알림용 |
+| `telegram.botToken` / `chatId` | 알림용 (아래 "Telegram 알림 설정" 참고). 비우면 알림 비활성 |
+
+### Telegram 알림 설정 (선택)
+
+예약 성공 시 텔레그램 메시지로 알림을 받고 싶으면 다음 절차로 봇 토큰과 채팅 ID 를 발급받아 `config.json` 에 채워넣음.
+
+#### 1. 봇 생성 및 토큰 발급
+
+1. Telegram 에서 [@BotFather](https://t.me/BotFather) 와 대화 시작
+2. `/newbot` 입력 → 봇 이름(표시명) 입력 → 봇 username 입력 (`_bot` 으로 끝나야 함, 예: `my_korail_alert_bot`)
+3. BotFather 가 응답으로 주는 **HTTP API token** 을 복사 (예: `123456789:ABCdefGHIjklMNOpqrSTUvwxYZ`)
+4. 이 값을 `config.json` 의 `telegram.botToken` 에 넣음
+
+#### 2. Chat ID 확인
+
+1. 방금 만든 봇을 검색해서 대화 시작 → 아무 메시지나 한 번 보냄 (예: `/start`)
+2. 브라우저에서 다음 주소 열기 (TOKEN 부분을 본인 토큰으로 교체):
+   ```
+   https://api.telegram.org/bot<TOKEN>/getUpdates
+   ```
+3. 응답 JSON 에서 `result[0].message.chat.id` 값을 찾아 `config.json` 의 `telegram.chatId` 에 넣음 (숫자, 음수일 수도 있음)
+
+또는 [@userinfobot](https://t.me/userinfobot) 과 대화하면 본인 chat ID 를 즉시 알려줌.
+
+#### 3. 동작 확인
+
+`config.json` 예시:
+```json
+{
+  "telegram": {
+    "botToken": "123456789:ABCdefGHIjklMNOpqrSTUvwxYZ",
+    "chatId": "987654321"
+  }
+}
+```
+
+설정 후 매크로가 예약 성공 또는 에러 발생 시 `[Korail] 예약 성공: 1019호. 5분 안에 결제를 완료하세요.` 같은 메시지가 봇에서 옴.
 
 ## 실행
 
