@@ -16,7 +16,6 @@
     "passengers": 1,
     "auto": false
   },
-  "trains": ["1019", "1023", "1041"],
   "polling": {
     "minDelayMs": 3000,
     "maxDelayMs": 6000,

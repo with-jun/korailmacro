@@ -44,7 +44,9 @@ async function main() {
 
     await korail.waitForUserToReachSearchList();
 
-    const result = await korail.monitor();
+    const selectedTrains = await korail.waitForUserToSelectAndStart();
+
+    const result = await korail.monitor(selectedTrains);
     if (result.success) {
       success = true;
       trainNum = result.trainNum;

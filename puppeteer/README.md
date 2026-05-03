@@ -17,9 +17,10 @@ Puppeteer 는 CDP(Chrome DevTools Protocol)를 통해 OS 레벨 마우스 이벤
 
 1. Puppeteer 가 headed 모드로 Chromium 실행 (`.user-data/` 에 세션 저장)
 2. 사용자가 직접 로그인 + 검색조건 입력 + 조회
-3. 검색결과 페이지(`/ticket/search/list`) 도착하면 자동 인계
-4. 대상 열차 모니터링 — 좌석 확인 / 클릭 / 예약 버튼 / CAPTCHA OCR
-5. 예약 페이지 도달 시 Telegram 알림 + 터미널 비프, 사용자가 5분 내 결제
+3. 검색결과 페이지(`/ticket/search/list`) 도착하면 페이지 UI 에 **"매크로" 체크박스 + "시작" 버튼** 주입
+4. 사용자가 모니터링할 열차에 체크 → "시작" 클릭
+5. 좌석 확인 / 클릭 / 예약 버튼 / CAPTCHA OCR 자동 진행
+6. 예약 페이지 도달 시 Telegram 알림 + 터미널 비프, 사용자가 5분 내 결제
 
 전체 reload 대신 **"열차조회" 버튼을 다시 누르는 방식**으로 재조회 + jitter 가 들어간 폴링 간격으로 NetFunnel mProtect 회피.
 
@@ -55,7 +56,6 @@ NetFunnel 같은 한국 안티봇은 stealth 플러그인만으로 부족함. CD
 | `korail.password` | 비밀번호 (자동 로그인 사용 시) |
 | `korail.autoLogin` | `true` 면 자동 로그인 시도, 실패 시 수동 폴백 |
 | `search.*` | 출발/도착/날짜/시간/인원 (현재는 사용자가 수동 입력. 자동화는 TODO) |
-| `trains` | 매크로 대상 열차번호 배열 (예: `["1019", "1023"]`) |
 | `polling.minDelayMs` / `maxDelayMs` | 재조회 간격 (jitter 범위). NetFunnel mProtect 회피 위해 3000~6000 권장 |
 | `polling.maxIterations` | 최대 재시도 횟수. `0` 이면 무한 |
 | `ocr.endpoint` | CAPTCHA OCR 서버 주소 (기존 background.js 와 동일) |

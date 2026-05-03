@@ -78,13 +78,86 @@ class Korail {
       URL_SEARCH,
     );
     await this.page.waitForSelector(SEL.trainRow, { timeout: 30000 });
-    this.log('검색 결과 페이지 인식 — 모니터링 시작');
+    this.log('검색 결과 페이지 인식 — 매크로 UI 주입');
   }
 
-  async monitor() {
-    const targetTrains = new Set((this.config.trains || []).map(String));
+  async waitForUserToSelectAndStart() {
+    let resolveStart;
+    const startPromise = new Promise((r) => { resolveStart = r; });
+
+    await this.page.exposeFunction('__korailMacroStart', (selected) => {
+      this.log(`사용자가 시작 클릭 — 대상 열차: ${selected.join(', ')}`);
+      resolveStart(selected);
+    });
+
+    await this.page.evaluate(() => {
+      const STYLE_BTN =
+        'margin-left:12px;padding:6px 16px;background:#d00;color:#fff;' +
+        'font-weight:bold;border:none;border-radius:4px;cursor:pointer;';
+      const STYLE_LBL =
+        'color:#d00;font-weight:bold;margin-left:4px;';
+
+      function injectCheckboxes() {
+        const rows = document.querySelectorAll('.tckWrap .tckList .tck_inner');
+        rows.forEach((row) => {
+          if (row.querySelector('.km-check')) return;
+          const numEl = row.querySelector('.num');
+          if (!numEl) return;
+          const trainNum = numEl.textContent.trim();
+          const wrap = document.createElement('div');
+          wrap.className = 'fl-l search-option-bar__check-wrap km-check';
+          wrap.style.marginRight = '12px';
+          wrap.innerHTML =
+            '<input type="checkbox" id="km-' + trainNum + '" value="' + trainNum + '">' +
+            '<label for="km-' + trainNum + '" style="' + STYLE_LBL + '">매크로</label>';
+          row.prepend(wrap);
+        });
+      }
+
+      function injectStartButton() {
+        const bar = document.querySelector('.search-option-bar__wrap');
+        if (!bar || document.getElementById('km-start')) return;
+        const btn = document.createElement('button');
+        btn.id = 'km-start';
+        btn.type = 'button';
+        btn.textContent = '시작';
+        btn.style.cssText = STYLE_BTN;
+        btn.addEventListener('click', () => {
+          const selected = Array.from(
+            document.querySelectorAll('.km-check input:checked')
+          ).map((i) => i.value);
+          if (selected.length === 0) {
+            alert('1개 이상의 열차를 선택하세요.');
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = '실행 중...';
+          btn.style.background = '#888';
+          window.__korailMacroStart(selected);
+        });
+        bar.appendChild(btn);
+      }
+
+      function inject() {
+        injectCheckboxes();
+        injectStartButton();
+      }
+
+      inject();
+
+      const observer = new MutationObserver(() => inject());
+      observer.observe(document.body, { childList: true, subtree: true });
+      window.__kmObserver = observer;
+    });
+
+    this.log('페이지에 체크박스 + "시작" 버튼 주입 완료. 열차를 선택하고 시작을 누르세요.');
+    return await startPromise;
+  }
+
+  async monitor(trains) {
+    const targetTrains = new Set((trains || []).map(String));
     if (targetTrains.size === 0) {
-      throw new Error('config.trains 가 비어있습니다.');
+      throw new Error('대상 열차가 비어있습니다.');
     }
     const minDelay = this.config.polling?.minDelayMs ?? 3000;
     const maxDelay = this.config.polling?.maxDelayMs ?? 6000;
