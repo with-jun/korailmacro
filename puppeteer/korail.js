@@ -227,7 +227,7 @@ class Korail {
         const seats = priceBoxes.map((pb, seatIdx) => {
           const cls = Array.from(pb.classList);
           const text = pb.textContent.trim();
-          const soldOut = cls.includes('sold_out') || /매진/.test(text);
+          const soldOut = cls.includes('sold_out');
           const disabled = text === '-' || /^-$/.test(text);
           const reservAnchor = pb.querySelector('a');
           const available = !!reservAnchor && !soldOut && !disabled;
