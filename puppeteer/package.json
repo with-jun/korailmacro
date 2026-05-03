@@ -1,0 +1,19 @@
+{
+  "name": "korail-macro-puppeteer",
+  "version": "0.1.0",
+  "description": "KORAIL 자동 예약 매크로 - Puppeteer 기반",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "form-data": "^4.0.0",
+    "node-fetch": "^2.7.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "rebrowser-puppeteer-core": "^23.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
