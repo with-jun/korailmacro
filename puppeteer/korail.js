@@ -57,12 +57,12 @@ class Korail {
     await this.page.goto(URL_LOGIN, { waitUntil: 'networkidle2' });
     this.log('로그인 폼 셀렉터는 페이지 변경에 민감 — 자동 로그인 실패 시 수동 로그인 모드로 다시 실행하세요.');
     try {
-      await this.page.waitForSelector('input#txtMember, input[name="txtMember"]', { timeout: 8000 });
-      await this.page.type('input#txtMember, input[name="txtMember"]', memberNo, { delay: 60 });
-      await this.page.type('input#txtPwd, input[name="txtPwd"]', password, { delay: 60 });
+      await this.page.waitForSelector('input#id, input[name="id"]', { timeout: 8000 });
+      await this.page.type('input#id, input[name="id"]', memberNo, { delay: 60 });
+      await this.page.type('input#password, input[name="password"]', password, { delay: 60 });
       await Promise.all([
         this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }),
-        this.page.click('button.btn_login, .btn_login button, button[type="submit"]'),
+        this.page.click('button.btn_bn-depblue'),
       ]);
     } catch (err) {
       throw new Error(`자동 로그인 실패: ${err.message}. 수동 로그인 모드로 전환을 권장합니다.`);
