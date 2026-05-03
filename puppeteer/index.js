@@ -44,9 +44,18 @@ async function main() {
 
     await korail.waitForUserToReachSearchList();
 
-    const selectedTrains = await korail.waitForUserToSelectAndStart();
+    let result;
+    while (true) {
+      const selectedTrains = await korail.waitForUserToSelectAndStart();
+      result = await korail.monitor(selectedTrains);
+      if (result.success) break;
+      if (result.reason === 'paused') {
+        log('일시중단 — 다시 선택할 수 있습니다.');
+        continue;
+      }
+      break;
+    }
 
-    const result = await korail.monitor(selectedTrains);
     if (result.success) {
       success = true;
       trainNum = result.trainNum;

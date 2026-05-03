@@ -20,6 +20,7 @@ class Korail {
     this.page = page;
     this.config = config;
     this.log = log || ((...a) => console.log(...a));
+    this._pauseRequested = false;
     this._installNetFunnelObserver();
   }
 
@@ -86,16 +87,34 @@ class Korail {
   }
 
   async waitForUserToSelectAndStart() {
-    let resolveStart;
-    const startPromise = new Promise((r) => { resolveStart = r; });
+    await this._injectSelectionUI();
+    this.log('페이지에 체크박스 + "시작" 버튼 주입. 열차를 선택하고 시작을 누르세요.');
 
-    await this.page.exposeFunction('__korailMacroStart', (selected) => {
-      this.log(`사용자가 시작 클릭 — 대상 열차: ${selected.join(', ')}`);
-      resolveStart(selected);
-    });
+    while (true) {
+      await sleep(200);
+      let selected = null;
+      try {
+        selected = await this.page.evaluate(() => window.__kmStartSelected || null);
+      } catch (_) {
+        continue;
+      }
+      if (Array.isArray(selected) && selected.length > 0) {
+        this.log(`사용자가 시작 클릭 — 대상 열차: ${selected.join(', ')}`);
+        try {
+          await this.page.evaluate(() => { window.__kmStartSelected = null; });
+        } catch (_) {}
+        return selected;
+      }
+    }
+  }
 
+  async _injectSelectionUI() {
     await this.page.evaluate(() => {
-      const STYLE_BTN =
+      document.querySelectorAll('.km-check, #km-start, #km-stop').forEach((el) => el.remove());
+      if (window.__kmObserver) { window.__kmObserver.disconnect(); window.__kmObserver = null; }
+      window.__kmStartSelected = null;
+
+      const STYLE_BTN_START =
         'margin-left:12px;padding:6px 16px;background:#d00;color:#fff;' +
         'font-weight:bold;border:none;border-radius:4px;cursor:pointer;';
       const STYLE_LBL =
@@ -125,7 +144,7 @@ class Korail {
         btn.id = 'km-start';
         btn.type = 'button';
         btn.textContent = '시작';
-        btn.style.cssText = STYLE_BTN;
+        btn.style.cssText = STYLE_BTN_START;
         btn.addEventListener('click', () => {
           const selected = Array.from(
             document.querySelectorAll('.km-check input:checked')
@@ -137,7 +156,8 @@ class Korail {
           btn.disabled = true;
           btn.textContent = '실행 중...';
           btn.style.background = '#888';
-          window.__korailMacroStart(selected);
+          window.__kmStartSelected = selected;
+          console.log('[km] 시작 플래그 설정됨:', selected);
         });
         bar.appendChild(btn);
       }
@@ -148,14 +168,53 @@ class Korail {
       }
 
       inject();
-
       const observer = new MutationObserver(() => inject());
       observer.observe(document.body, { childList: true, subtree: true });
       window.__kmObserver = observer;
     });
+  }
 
-    this.log('페이지에 체크박스 + "시작" 버튼 주입 완료. 열차를 선택하고 시작을 누르세요.');
-    return await startPromise;
+  async _injectMonitoringUI() {
+    await this.page.evaluate(() => {
+      document.querySelectorAll('.km-check, #km-start, #km-stop').forEach((el) => el.remove());
+      if (window.__kmObserver) { window.__kmObserver.disconnect(); window.__kmObserver = null; }
+      window.__kmPauseFlag = false;
+
+      const STYLE_BTN_STOP =
+        'margin-left:12px;padding:6px 16px;background:#444;color:#fff;' +
+        'font-weight:bold;border:none;border-radius:4px;cursor:pointer;';
+
+      function injectStopButton() {
+        const bar = document.querySelector('.search-option-bar__wrap');
+        if (!bar || document.getElementById('km-stop')) return;
+        const btn = document.createElement('button');
+        btn.id = 'km-stop';
+        btn.type = 'button';
+        btn.textContent = '중단';
+        btn.style.cssText = STYLE_BTN_STOP;
+        btn.addEventListener('click', () => {
+          btn.disabled = true;
+          btn.textContent = '중단 중...';
+          btn.style.background = '#888';
+          window.__kmPauseFlag = true;
+          console.log('[km] 중단 플래그 설정됨');
+        });
+        bar.appendChild(btn);
+      }
+
+      injectStopButton();
+      const observer = new MutationObserver(() => injectStopButton());
+      observer.observe(document.body, { childList: true, subtree: true });
+      window.__kmObserver = observer;
+    });
+  }
+
+  async _isPauseFlagSet() {
+    try {
+      return await this.page.evaluate(() => !!window.__kmPauseFlag);
+    } catch (_) {
+      return false;
+    }
   }
 
   async monitor(trains) {
@@ -167,8 +226,17 @@ class Korail {
     const maxDelay = this.config.polling?.maxDelayMs ?? 6000;
     const maxIter = this.config.polling?.maxIterations ?? 0;
 
+    this._pauseRequested = false;
+    await this._injectMonitoringUI();
+
     let iter = 0;
     while (true) {
+      if (this._pauseRequested) {
+        this._pauseRequested = false;
+        this.log('일시중단됨 — 선택 화면으로 복귀');
+        return { success: false, reason: 'paused' };
+      }
+
       iter += 1;
       if (maxIter > 0 && iter > maxIter) {
         return { success: false, reason: 'maxIterations 도달' };
@@ -200,12 +268,19 @@ class Korail {
       }
 
       const delay = jitter(minDelay, maxDelay);
-      await sleep(delay);
+      await this._interruptibleSleep(delay);
+
+      if (this._pauseRequested || await this._isPauseFlagSet()) {
+        this._pauseRequested = false;
+        this.log('일시중단됨 — 선택 화면으로 복귀');
+        return { success: false, reason: 'paused' };
+      }
 
       this.log('재조회 (reload)');
       try {
         await this.page.reload({ waitUntil: 'networkidle2' });
         await this.page.waitForSelector(SEL.trainRow, { timeout: 15000 });
+        await this._injectMonitoringUI();
       } catch (err) {
         this.log(`reload 실패: ${err.message} — 재시도`);
         await sleep(2000);
@@ -346,6 +421,20 @@ class Korail {
     }
   }
 
+  async _interruptibleSleep(ms) {
+    const tick = 200;
+    const start = Date.now();
+    while (Date.now() - start < ms) {
+      if (this._pauseRequested) return;
+      if (await this._isPauseFlagSet()) {
+        this._pauseRequested = true;
+        this.log('중단 플래그 감지');
+        return;
+      }
+      const remaining = ms - (Date.now() - start);
+      await sleep(Math.min(tick, remaining));
+    }
+  }
 }
 
 function sleep(ms) {
