@@ -15,10 +15,12 @@ const SEL = {
   captSubmit: '.ui-dialog button',
   reactModal: '.ReactModal__Content[role="dialog"]',
   modalConfirm: '.btn_pop-close',
+  waitlistForm: '.type_waiting',
+  waitlistSubmit: '.type_waiting .btnWrap .btn_bn-blue',
 };
 
 // 모달 문구가 이 패턴에 걸리면 진행 불가로 판단 (그 외 안내 모달은 확인 후 진행)
-const FAILURE_MODAL_PATTERN = /매진|잔여석|좌석이 없|오류|실패|불가|초과|만료|다시 시도/;
+const FAILURE_MODAL_PATTERN = /동일한 예약|매진|잔여석|좌석이 없|오류|실패|불가|초과|만료|다시 시도/;
 
 class Korail {
   constructor(page, config, log) {
@@ -267,7 +269,7 @@ class Korail {
         this.log(`예약 시도: ${target.trainNum}호 / 좌석유형 idx=${seat.seatIdx}`);
         const result = await this._tryReserve(target, seat);
         if (result.success) {
-          return { success: true, trainNum: target.trainNum };
+          return { success: true, trainNum: target.trainNum, waitlist: result.waitlist };
         }
         this.log(`예약 실패: ${result.reason} — 계속 모니터링`);
       }
@@ -358,8 +360,8 @@ class Korail {
       return { success: false, reason: '예약 확인 버튼 못 찾음' };
     }
 
-    const { arrived, reason } = await this._waitForReservationPage();
-    if (arrived) return { success: true };
+    const { arrived, waitlist, reason } = await this._waitForReservationPage();
+    if (arrived) return { success: true, waitlist: !!waitlist };
     return { success: false, reason: reason || '예약 페이지 도달 실패 — 매진/오류 가능성' };
   }
 
@@ -394,19 +396,24 @@ class Korail {
   }
 
   async _clickReservButton() {
+    // 하단 바에 '입석+좌석 예매'(btn-disabled) 같은 비활성 버튼이 함께 뜨는 경우가 있어 제외
+    const enabled = ':not(.btn-disabled):not([disabled])';
     const candidates = [
-      '.ticket_reserv_wrap .reservbtn',
-      '.reservbtn',
-      'button.btn_reserv',
-      'button[class*="reserv" i]',
-      'a.btn_bn-blue:has-text("예약")',
+      `.ticket_reserv_wrap .reservbtn${enabled}`,
+      `.reservbtn${enabled}`,
+      `button.btn_reserv${enabled}`,
+      `button[class*="reserv" i]${enabled}`,
+      `.ticket_reserv_wrap [class*="btn_bn-blue"]${enabled}`,
     ];
     for (const sel of candidates) {
       try {
         const el = await this.page.waitForSelector(sel, { timeout: 1500 });
         if (el) {
+          const desc = await el.evaluate(
+            (e) => `${e.tagName.toLowerCase()}.${e.className.trim().replace(/\s+/g, '.')} "${e.textContent.trim()}"`
+          );
           await el.click({ delay: 30 });
-          this.log(`예약 버튼 클릭: ${sel}`);
+          this.log(`예약 버튼 클릭: ${sel} → ${desc}`);
           return true;
         }
       } catch (_) {}
@@ -419,10 +426,11 @@ class Korail {
   async _waitForReservationPage(timeoutMs = 8000) {
     const deadline = Date.now() + timeoutMs;
     const handled = new Set();
+    let waitlistSubmitted = false;
     while (Date.now() < deadline) {
       let state;
       try {
-        state = await this.page.evaluate((modalSel) => {
+        state = await this.page.evaluate((modalSel, waitlistSel) => {
           if (/\/ticket\/(reservation|payment|confirm|seat)/.test(location.pathname)) {
             return { arrived: true };
           }
@@ -433,15 +441,29 @@ class Korail {
           return {
             arrived: false,
             modalText: msgEl.textContent.replace(/\s+/g, ' ').trim(),
+            isWaitlistForm: !!modal.querySelector(waitlistSel),
           };
-        }, SEL.reactModal);
+        }, SEL.reactModal, SEL.waitlistForm);
       } catch (_) {
         // 페이지 이동 중 컨텍스트 파괴 — 다음 틱에 재확인
         await sleep(200);
         continue;
       }
 
-      if (state.arrived) return { arrived: true };
+      if (state.arrived) return { arrived: true, waitlist: waitlistSubmitted };
+
+      // 예약대기 신청 폼: 취소(.btn_pop-close) 가 아닌 '대기신청' 버튼을 눌러야 함
+      if (state.isWaitlistForm) {
+        if (waitlistSubmitted) {
+          return { arrived: false, reason: '예약대기 신청 폼이 닫히지 않음' };
+        }
+        this.log('[modal] 예약대기 신청 폼 — 대기신청 클릭');
+        const ok = await this._clickSelector(`${SEL.reactModal} ${SEL.waitlistSubmit}`);
+        if (!ok) return { arrived: false, reason: '대기신청 버튼 못 찾음' };
+        waitlistSubmitted = true;
+        await sleep(300);
+        continue;
+      }
 
       if (state.modalText) {
         const text = state.modalText;
@@ -450,18 +472,22 @@ class Korail {
           this.log(`[modal] ${text}`);
           handled.add(text);
         }
-        const closed = await this._clickModalConfirm();
+        const closed = await this._clickSelector(`${SEL.reactModal} ${SEL.modalConfirm}`);
         if (isFailure) return { arrived: false, reason: `모달: ${text}` };
         if (!closed) return { arrived: false, reason: `모달 확인 버튼 못 찾음: ${text}` };
+        // 대기신청 후 뜨는 결과 안내(실패 문구 아님)는 신청 완료로 간주
+        if (waitlistSubmitted) return { arrived: true, waitlist: true };
       }
       await sleep(200);
     }
+    // 대기신청을 누른 뒤 실패 모달 없이 끝났으면 신청된 것으로 보고 중복 신청을 막기 위해 종료
+    if (waitlistSubmitted) return { arrived: true, waitlist: true };
     return { arrived: false };
   }
 
-  async _clickModalConfirm() {
+  async _clickSelector(sel) {
     try {
-      const btn = await this.page.$(`${SEL.reactModal} ${SEL.modalConfirm}`);
+      const btn = await this.page.$(sel);
       if (!btn) return false;
       await btn.click({ delay: 30 });
       return true;
