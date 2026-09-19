@@ -13,7 +13,12 @@ const SEL = {
   captImg: '#captImg',
   captAnswer: '#chkCapAnswer',
   captSubmit: '.ui-dialog button',
+  reactModal: '.ReactModal__Content[role="dialog"]',
+  modalConfirm: '.btn_pop-close',
 };
+
+// 모달 문구가 이 패턴에 걸리면 진행 불가로 판단 (그 외 안내 모달은 확인 후 진행)
+const FAILURE_MODAL_PATTERN = /매진|잔여석|좌석이 없|오류|실패|불가|초과|만료|다시 시도/;
 
 class Korail {
   constructor(page, config, log) {
@@ -353,9 +358,9 @@ class Korail {
       return { success: false, reason: '예약 확인 버튼 못 찾음' };
     }
 
-    const arrived = await this._waitForReservationPage();
+    const { arrived, reason } = await this._waitForReservationPage();
     if (arrived) return { success: true };
-    return { success: false, reason: '예약 페이지 도달 실패 — 매진/오류 가능성' };
+    return { success: false, reason: reason || '예약 페이지 도달 실패 — 매진/오류 가능성' };
   }
 
   async _handleCaptchaIfPresent() {
@@ -409,12 +414,56 @@ class Korail {
     return false;
   }
 
-  async _waitForReservationPage() {
+  // 예매 버튼 이후 예약 페이지 이동을 기다리면서, 중간에 뜨는 React 모달(이용안내 등)을 처리.
+  // 안내성 모달은 확인을 눌러 진행하고, 실패성 문구(매진 등)면 닫고 실패 처리.
+  async _waitForReservationPage(timeoutMs = 8000) {
+    const deadline = Date.now() + timeoutMs;
+    const handled = new Set();
+    while (Date.now() < deadline) {
+      let state;
+      try {
+        state = await this.page.evaluate((modalSel) => {
+          if (/\/ticket\/(reservation|payment|confirm|seat)/.test(location.pathname)) {
+            return { arrived: true };
+          }
+          const modal = Array.from(document.querySelectorAll(modalSel))
+            .find((m) => m.offsetParent !== null || m.getClientRects().length > 0);
+          if (!modal) return { arrived: false };
+          const msgEl = modal.querySelector('.confirm_message') || modal;
+          return {
+            arrived: false,
+            modalText: msgEl.textContent.replace(/\s+/g, ' ').trim(),
+          };
+        }, SEL.reactModal);
+      } catch (_) {
+        // 페이지 이동 중 컨텍스트 파괴 — 다음 틱에 재확인
+        await sleep(200);
+        continue;
+      }
+
+      if (state.arrived) return { arrived: true };
+
+      if (state.modalText) {
+        const text = state.modalText;
+        const isFailure = FAILURE_MODAL_PATTERN.test(text);
+        if (!handled.has(text)) {
+          this.log(`[modal] ${text}`);
+          handled.add(text);
+        }
+        const closed = await this._clickModalConfirm();
+        if (isFailure) return { arrived: false, reason: `모달: ${text}` };
+        if (!closed) return { arrived: false, reason: `모달 확인 버튼 못 찾음: ${text}` };
+      }
+      await sleep(200);
+    }
+    return { arrived: false };
+  }
+
+  async _clickModalConfirm() {
     try {
-      await this.page.waitForFunction(
-        () => /\/ticket\/(reservation|payment|confirm|seat)/.test(location.pathname),
-        { timeout: 6000 }
-      );
+      const btn = await this.page.$(`${SEL.reactModal} ${SEL.modalConfirm}`);
+      if (!btn) return false;
+      await btn.click({ delay: 30 });
       return true;
     } catch (_) {
       return false;
