@@ -14,10 +14,10 @@
 2. 사용자가 직접 로그인 + 검색조건 입력 + 조회
 3. 검색결과 페이지(`/ticket/search/list`) 도착하면 페이지 UI 에 **"매크로" 체크박스 + "시작" 버튼** 주입
 4. 사용자가 모니터링할 열차에 체크 → "시작" 클릭
-5. 좌석 확인 / 클릭 / 예약 버튼 / CAPTCHA OCR 자동 진행
+5. 좌석 확인 / 클릭 / 예약 버튼 자동 진행
 6. 예약 페이지 도달 시 Telegram 알림 + 터미널 비프, 사용자가 5분 내 결제
 
-전체 reload 대신 **"열차조회" 버튼을 다시 누르는 방식**으로 재조회 + jitter 가 들어간 폴링 간격으로 NetFunnel mProtect 회피.
+검색결과 페이지를 reload 하여 재조회 + jitter 가 들어간 폴링 간격으로 NetFunnel mProtect 회피.
 
 ## 설치
 
@@ -51,8 +51,6 @@ NetFunnel 같은 한국 안티봇은 stealth 플러그인만으로 부족함. CD
 | `korail.autoLogin` | `true` 면 자동 로그인 시도, 실패 시 수동 폴백 |
 | `polling.minDelayMs` / `maxDelayMs` | 재조회 간격 (jitter 범위). NetFunnel mProtect 회피 위해 3000~6000 권장 |
 | `polling.maxIterations` | 최대 재시도 횟수. `0` 이면 무한 |
-| `ocr.endpoint` | CAPTCHA OCR 서버 주소 (Google Vision API 호환) |
-| `ocr.enabled` | OCR 사용 여부 |
 | `telegram.botToken` / `chatId` | 알림용 (아래 "Telegram 알림 설정" 참고). 비우면 알림 비활성 |
 
 ### Telegram 알림 설정 (선택)
@@ -111,7 +109,6 @@ node index.js ./config.json
 - **자동 로그인 셀렉터** — `input#id` / `input#password` / `button.btn_bn-depblue` 가정. 페이지 변경 시 `korail.js` 의 `login()` 수정 필요.
 - **예약 확인 버튼 셀렉터** — `_clickReservButton()` 에 후보 셀렉터 여러 개를 시도하는 형태. 신규 페이지 마크업 확인 후 첫 번째 후보를 정확한 셀렉터로 교체 권장.
 - **NetFunnel 직접 제어** — 현재 코드는 NetFunnel JS 가 알아서 큐를 통과하도록 두는 방식. 정상 사용자처럼 행동하므로 보통 충분함. 만약 토큰이 만료되거나 `IP_BLOCK` 이 떨어지면 별도 처리 필요 (브라우저 재시작 / IP 변경).
-- **CAPTCHA OCR 의존성** — `localhost:3000/vision/text-detection` 서버가 켜져 있어야 함. 끄려면 `ocr.enabled: false`. 그 경우 CAPTCHA 가 뜨면 사용자가 직접 입력.
 
 ## 안티-디텍션 측면
 

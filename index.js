@@ -7,7 +7,7 @@ const { Korail } = require('./korail');
 const { sendTelegram } = require('./telegram');
 
 function ts() {
-  return new Date().toISOString().replace('T', ' ').slice(0, 19);
+  return new Date().toISOString().replace('T', ' ').slice(0, 23);
 }
 function log(...args) {
   console.log(`[${ts()}]`, ...args);

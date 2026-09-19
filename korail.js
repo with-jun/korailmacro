@@ -1,5 +1,3 @@
-const { detectCaptcha } = require('./captcha');
-
 const URL_MAIN = 'https://www.korail.com/ticket/main';
 const URL_LOGIN = 'https://www.korail.com/ticket/login';
 const URL_SEARCH_FORM = 'https://www.korail.com/ticket/search/general';
@@ -10,9 +8,6 @@ const SEL = {
   trainInner: '.tck_inner',
   trainNum: '.num',
   priceBox: '.tck_inner > .price_box',
-  captImg: '#captImg',
-  captAnswer: '#chkCapAnswer',
-  captSubmit: '.ui-dialog button',
   reactModal: '.ReactModal__Content[role="dialog"]',
   modalConfirm: '.btn_pop-close',
   waitlistForm: '.type_waiting',
@@ -41,11 +36,6 @@ class Korail {
     this.page.on('dialog', async (dialog) => {
       const m = dialog.message();
       this.log(`[dialog:${dialog.type()}] ${m}`);
-      if (m.includes('입력값이 일치하지 않습니다')) {
-        await dialog.dismiss();
-        await this.page.reload({ waitUntil: 'networkidle2' });
-        return;
-      }
       if (dialog.type() === 'confirm') {
         await dialog.accept();
         return;
@@ -283,10 +273,12 @@ class Korail {
         return { success: false, reason: 'paused' };
       }
 
-      this.log('재조회 (reload)');
       try {
-        await this.page.reload({ waitUntil: 'networkidle2' });
+        // networkidle2 는 네트워크가 0.5초 조용해질 때까지 기다리므로, DOM 로드 후 목록이 뜨는 즉시 진행
+        const t0 = Date.now();
+        await this.page.reload({ waitUntil: 'domcontentloaded' });
         await this.page.waitForSelector(SEL.trainRow, { timeout: 15000 });
+        this.log(`재조회 (reload) ${Date.now() - t0}ms`);
         await this._injectMonitoringUI();
       } catch (err) {
         this.log(`reload 실패: ${err.message} — 재시도`);
@@ -327,6 +319,7 @@ class Korail {
   }
 
   async _tryReserve(train, seat) {
+    const t0 = Date.now();
     const seatHandle = await this.page.evaluateHandle((sel, rowIdx, seatIdx) => {
       const rows = document.querySelectorAll(sel.trainRow);
       const row = rows[rowIdx];
@@ -350,49 +343,17 @@ class Korail {
       return { success: false, reason: `좌석 클릭 실패: ${err.message}` };
     }
 
-    const captchaResult = await this._handleCaptchaIfPresent();
-    if (captchaResult === 'failed') {
-      return { success: false, reason: 'CAPTCHA 처리 실패' };
-    }
-
     const reservButtonClicked = await this._clickReservButton();
     if (!reservButtonClicked) {
       return { success: false, reason: '예약 확인 버튼 못 찾음' };
     }
+    const t1 = Date.now();
+    this.log(`좌석 클릭 → 예매 버튼 클릭 ${t1 - t0}ms`);
 
     const { arrived, waitlist, reason } = await this._waitForReservationPage();
+    this.log(`예매 버튼 → 결과 ${Date.now() - t1}ms`);
     if (arrived) return { success: true, waitlist: !!waitlist };
     return { success: false, reason: reason || '예약 페이지 도달 실패 — 매진/오류 가능성' };
-  }
-
-  async _handleCaptchaIfPresent() {
-    if (!this.config.ocr?.enabled) return 'absent';
-    try {
-      await this.page.waitForSelector(SEL.captImg, { timeout: 1500 });
-    } catch (_) {
-      return 'absent';
-    }
-    this.log('CAPTCHA 감지 — OCR 호출');
-    try {
-      const dataUrl = await this.page.evaluate((sel) => {
-        const img = document.querySelector(sel);
-        if (!img) return null;
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth || img.width;
-        canvas.height = img.naturalHeight || img.height;
-        canvas.getContext('2d').drawImage(img, 0, 0);
-        return canvas.toDataURL();
-      }, SEL.captImg);
-      if (!dataUrl) return 'failed';
-      const text = await detectCaptcha(dataUrl, this.config.ocr.endpoint);
-      this.log(`OCR 결과: "${text}"`);
-      await this.page.type(SEL.captAnswer, text, { delay: 50 });
-      await this.page.click(SEL.captSubmit);
-      return 'ok';
-    } catch (err) {
-      this.log(`CAPTCHA 처리 에러: ${err.message}`);
-      return 'failed';
-    }
   }
 
   async _clickReservButton() {

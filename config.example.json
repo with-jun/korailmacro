@@ -13,10 +13,6 @@
     "maxDelayMs": 6000,
     "maxIterations": 0
   },
-  "ocr": {
-    "endpoint": "http://localhost:3000/vision/text-detection",
-    "enabled": true
-  },
   "telegram": {
     "botToken": "",
     "chatId": ""
