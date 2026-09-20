@@ -95,8 +95,11 @@ class Korail {
       } catch (_) {
         continue;
       }
-      if (Array.isArray(selected) && selected.length > 0) {
-        this.log(`사용자가 시작 클릭 — 대상 열차: ${selected.join(', ')}`);
+      if (selected && Array.isArray(selected.trains) && selected.trains.length > 0) {
+        this.log(
+          `사용자가 시작 클릭 — 대상 열차: ${selected.trains.join(', ')}` +
+          ` / 예약대기 ${selected.allowWaitlist ? '포함' : '제외'}`
+        );
         try {
           await this.page.evaluate(() => { window.__kmStartSelected = null; });
         } catch (_) {}
@@ -107,7 +110,7 @@ class Korail {
 
   async _injectSelectionUI() {
     await this.page.evaluate(() => {
-      document.querySelectorAll('.km-check, #km-start, #km-stop').forEach((el) => el.remove());
+      document.querySelectorAll('.km-check, #km-start, #km-stop, #km-waitlist-wrap').forEach((el) => el.remove());
       if (window.__kmObserver) { window.__kmObserver.disconnect(); window.__kmObserver = null; }
       window.__kmStartSelected = null;
 
@@ -116,7 +119,6 @@ class Korail {
         'font-weight:bold;border:none;border-radius:4px;cursor:pointer;';
       const STYLE_LBL =
         'color:#d00;font-weight:bold;margin-left:4px;';
-
       function injectCheckboxes() {
         const rows = document.querySelectorAll('.tckWrap .tckList .tck_inner');
         rows.forEach((row) => {
@@ -132,6 +134,23 @@ class Korail {
             '<label for="km-' + trainNum + '" style="' + STYLE_LBL + '">매크로</label>';
           row.prepend(wrap);
         });
+      }
+
+      function injectWaitlistCheckbox() {
+        const bar = document.querySelector('.search-option-bar__wrap');
+        if (!bar || document.getElementById('km-waitlist-wrap')) return;
+        // 옵션 바의 기존 체크박스(왕복, 인접역 보기 …)와 동일한 마크업/클래스 사용
+        const wrap = document.createElement('div');
+        wrap.id = 'km-waitlist-wrap';
+        wrap.className = 'search-option-bar__check-wrap';
+        wrap.innerHTML =
+          '<li class="fl-l">' +
+          '<input type="checkbox" id="km-waitlist" checked>' +
+          '<label for="km-waitlist" class="search-option-bar__checkbox-rt">예약대기 포함</label>' +
+          '</li>';
+        const start = document.getElementById('km-start');
+        if (start) bar.insertBefore(wrap, start);
+        else bar.appendChild(wrap);
       }
 
       function injectStartButton() {
@@ -153,8 +172,9 @@ class Korail {
           btn.disabled = true;
           btn.textContent = '실행 중...';
           btn.style.background = '#888';
-          window.__kmStartSelected = selected;
-          console.log('[km] 시작 플래그 설정됨:', selected);
+          const allowWaitlist = !!document.getElementById('km-waitlist')?.checked;
+          window.__kmStartSelected = { trains: selected, allowWaitlist };
+          console.log('[km] 시작 플래그 설정됨:', selected, '예약대기 포함:', allowWaitlist);
         });
         bar.appendChild(btn);
       }
@@ -162,6 +182,7 @@ class Korail {
       function inject() {
         injectCheckboxes();
         injectStartButton();
+        injectWaitlistCheckbox();
       }
 
       inject();
@@ -214,7 +235,9 @@ class Korail {
     }
   }
 
-  async monitor(trains) {
+  async monitor(selection) {
+    const trains = Array.isArray(selection) ? selection : selection?.trains;
+    const allowWaitlist = Array.isArray(selection) ? true : !!selection?.allowWaitlist;
     const targetTrains = new Set((trains || []).map(String));
     if (targetTrains.size === 0) {
       throw new Error('대상 열차가 비어있습니다.');
@@ -253,10 +276,24 @@ class Korail {
         .join(' ');
       this.log(`[#${iter}] 후보 ${candidates.length}: ${status || '없음'}`);
 
-      const target = candidates.find(c => c.seats.some(s => s.available));
-      if (target) {
-        const seat = target.seats.find(s => s.available);
-        this.log(`예약 시도: ${target.trainNum}호 / 좌석유형 idx=${seat.seatIdx}`);
+      // 예매 가능한 좌석을 먼저, 없으면 (체크된 경우에만) 예약대기 좌석
+      const pick = (fn) => {
+        for (const c of candidates) {
+          const seat = c.seats.find(fn);
+          if (seat) return { target: c, seat };
+        }
+        return null;
+      };
+      const found =
+        pick((s) => s.available && !s.waitlist) ||
+        (allowWaitlist ? pick((s) => s.available && s.waitlist) : null);
+
+      if (found) {
+        const { target, seat } = found;
+        this.log(
+          `${seat.waitlist ? '예약대기 시도' : '예약 시도'}: ${target.trainNum}호` +
+          ` / 좌석유형 idx=${seat.seatIdx}`
+        );
         const result = await this._tryReserve(target, seat);
         if (result.success) {
           return { success: true, trainNum: target.trainNum, waitlist: result.waitlist };
@@ -302,14 +339,16 @@ class Korail {
           const cls = Array.from(pb.classList);
           const text = pb.textContent.trim();
           const soldOut = cls.includes('sold_out');
+          const waitlist = cls.includes('wait');
           const disabled = text === '-' || /^-$/.test(text);
           const reservAnchor = pb.querySelector('a');
           const available = !!reservAnchor && !soldOut && !disabled;
           let label = '-';
           if (soldOut) label = '매진';
           else if (disabled) label = '없음';
+          else if (waitlist) label = '대기';
           else if (available) label = '가능';
-          return { seatIdx, soldOut, disabled, available, label };
+          return { seatIdx, soldOut, waitlist, disabled, available, label };
         });
 
         results.push({ rowIdx, trainNum, seats });
