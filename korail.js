@@ -3,6 +3,11 @@ const URL_LOGIN = 'https://www.korail.com/ticket/login';
 const URL_SEARCH_FORM = 'https://www.korail.com/ticket/search/general';
 const URL_SEARCH = 'https://www.korail.com/ticket/search/list';
 
+const { sendTelegram } = require('./telegram');
+
+// 목록 대기 실패가 이만큼 연속되면 Telegram 으로 한 번 알림
+const LIST_FAIL_ALERT_AT = 10;
+
 const SEL = {
   trainRow: '.tckWrap .tckList',
   trainInner: '.tck_inner',
@@ -250,6 +255,8 @@ class Korail {
     await this._injectMonitoringUI();
 
     let iter = 0;
+    let listFails = 0;
+    let listFailAlerted = false;
     while (true) {
       if (this._pauseRequested) {
         this._pauseRequested = false;
@@ -264,9 +271,32 @@ class Korail {
 
       try {
         await this.page.waitForSelector(SEL.trainRow, { timeout: 15000 });
+        if (listFails > 0) {
+          this.log(`목록 복구됨 (${listFails}회 실패 후)`);
+          listFails = 0;
+          listFailAlerted = false;
+        }
       } catch (err) {
-        this.log(`목록을 찾지 못함: ${err.message}. 페이지 상태 확인 필요.`);
-        await sleep(2000);
+        // 일시적인 현상인 경우가 많아 새로고침으로 자가 복구를 시도
+        listFails += 1;
+        this.log(`목록을 찾지 못함 — 새로고침으로 복구 시도 (${listFails}회째): ${err.message}`);
+
+        if (listFails >= LIST_FAIL_ALERT_AT && !listFailAlerted) {
+          listFailAlerted = true;
+          await sendTelegram(
+            this.config.telegram,
+            `[Korail] 열차 목록을 ${listFails}회 연속 불러오지 못했습니다. 브라우저 상태를 확인하세요.`
+          );
+        }
+
+        await sleep(Math.min(2000 * listFails, 10000));
+        try {
+          await this.page.reload({ waitUntil: 'domcontentloaded' });
+          await this.page.waitForSelector(SEL.trainRow, { timeout: 15000 });
+          await this._injectMonitoringUI();
+        } catch (reloadErr) {
+          this.log(`복구 새로고침 실패: ${reloadErr.message} — 다시 시도`);
+        }
         continue;
       }
 
