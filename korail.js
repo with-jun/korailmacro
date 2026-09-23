@@ -8,6 +8,9 @@ const { sendTelegram } = require('./telegram');
 // 목록 대기 실패가 이만큼 연속되면 Telegram 으로 한 번 알림
 const LIST_FAIL_ALERT_AT = 10;
 
+// NetFunnel 대기열을 기다리는 최대 시간 (이후에는 새로고침으로 복구 시도)
+const NETFUNNEL_MAX_WAIT_MS = 5 * 60 * 1000;
+
 const SEL = {
   trainRow: '.tckWrap .tckList',
   trainInner: '.tck_inner',
@@ -15,6 +18,7 @@ const SEL = {
   priceBox: '.tck_inner > .price_box',
   reactModal: '.ReactModal__Content[role="dialog"]',
   modalConfirm: '.btn_pop-close',
+  netfunnel: '#nf-vwr-background',
   waitlistForm: '.type_waiting',
   waitlistSubmit: '.type_waiting .btnWrap .btn_bn-blue',
 };
@@ -277,6 +281,15 @@ class Korail {
           listFailAlerted = false;
         }
       } catch (err) {
+        // NetFunnel 대기열이면 새로고침은 순번을 잃게 하므로 그대로 기다림
+        const queued = await this._waitOutNetFunnel();
+        if (queued === 'paused') {
+          this._pauseRequested = false;
+          this.log('일시중단됨 — 선택 화면으로 복귀');
+          return { success: false, reason: 'paused' };
+        }
+        if (queued === 'passed') continue;
+
         // 일시적인 현상인 경우가 많아 새로고침으로 자가 복구를 시도
         listFails += 1;
         this.log(`목록을 찾지 못함 — 새로고침으로 복구 시도 (${listFails}회째): ${err.message}`);
@@ -344,7 +357,7 @@ class Korail {
         // networkidle2 는 네트워크가 0.5초 조용해질 때까지 기다리므로, DOM 로드 후 목록이 뜨는 즉시 진행
         const t0 = Date.now();
         await this.page.reload({ waitUntil: 'domcontentloaded' });
-        await this.page.waitForSelector(SEL.trainRow, { timeout: 15000 });
+        await this.page.waitForSelector(SEL.trainRow, { timeout: 60000 });
         this.log(`재조회 (reload) ${Date.now() - t0}ms`);
         await this._injectMonitoringUI();
       } catch (err) {
@@ -352,6 +365,62 @@ class Korail {
         await sleep(2000);
       }
     }
+  }
+
+  // NetFunnel 대기 화면이 떠 있으면 사라질 때까지 기다린다.
+  // 'passed' = 대기열을 통과함, 'absent' = 대기열이 아니었음, 'timeout' = 최대 대기 초과, 'paused' = 중단 요청
+  async _waitOutNetFunnel() {
+    const state = () => this.page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const visible = !!el && (el.offsetParent !== null || el.getClientRects().length > 0);
+      if (!visible) return { visible: false };
+      return {
+        visible: true,
+        progress: el.querySelector('progress.nf-vwr-metrics-progress')?.value ?? null,
+        behind: el.querySelector('.nf-vwr-metrics-value')?.textContent.trim() || null,
+      };
+    }, SEL.netfunnel);
+
+    let first;
+    try {
+      first = await state();
+    } catch (_) {
+      return 'absent';
+    }
+    if (!first.visible) return 'absent';
+
+    this.log('NetFunnel 대기열 감지 — 새로고침 없이 대기');
+    const start = Date.now();
+    let lastLog = 0;
+    while (Date.now() - start < NETFUNNEL_MAX_WAIT_MS) {
+      if (this._pauseRequested || await this._isPauseFlagSet()) return 'paused';
+
+      let cur;
+      try {
+        cur = await state();
+      } catch (_) {
+        await sleep(1000);
+        continue;
+      }
+
+      if (!cur.visible) {
+        const waited = Math.round((Date.now() - start) / 1000);
+        this.log(`NetFunnel 대기열 통과 (${waited}초)`);
+        return 'passed';
+      }
+
+      if (Date.now() - lastLog >= 10000) {
+        lastLog = Date.now();
+        const parts = [];
+        if (cur.progress !== null) parts.push(`진행률 ${cur.progress}%`);
+        if (cur.behind) parts.push(`내 뒤 ${cur.behind}명`);
+        this.log(`NetFunnel 대기 중${parts.length ? ` (${parts.join(', ')})` : ''}`);
+      }
+      await sleep(1000);
+    }
+
+    this.log(`NetFunnel 대기가 ${Math.round(NETFUNNEL_MAX_WAIT_MS / 1000)}초를 넘김 — 새로고침으로 복구 시도`);
+    return 'timeout';
   }
 
   async _scrapeCandidates(targets) {
