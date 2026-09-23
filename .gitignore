@@ -2,3 +2,5 @@ node_modules/
 .user-data/
 config.json
 *.log
+config.*.json
+!config.example.json
